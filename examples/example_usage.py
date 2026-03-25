@@ -141,6 +141,6 @@ def example_programmatic_usage():
 
 
 if __name__ == '__main__':
-    example_compare_json_files()
+    # example_compare_json_files()
     example_compare_properties()
-    example_programmatic_usage()
+    # example_programmatic_usage()

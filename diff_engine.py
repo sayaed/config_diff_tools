@@ -3,7 +3,7 @@ import json
 import difflib
 from typing import Dict, List, Any, Optional, Union
 from enum import Enum
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -41,10 +41,12 @@ class CompareResult:
     differences: List[DiffResult]
     summary: Dict[str, int]
     config_type: str
+    source_properties: Optional[Dict[str, Any]] = None  # 新增：源配置属性
+    target_properties: Optional[Dict[str, Any]] = None  # 新增：目标配置属性
 
     def to_dict(self) -> Dict:
         """转换为字典格式"""
-        return {
+        result = {
             "source": self.source_info,
             "target": self.target_info,
             "differences": [d.to_dict() for d in self.differences],
@@ -52,6 +54,14 @@ class CompareResult:
             "config_type": self.config_type,
             "timestamp": datetime.now().isoformat()
         }
+
+        # 添加properties字段（如果存在）
+        if self.source_properties is not None:
+            result["source_properties"] = self.source_properties
+        if self.target_properties is not None:
+            result["target_properties"] = self.target_properties
+
+        return result
 
 
 class DiffEngine:
@@ -69,7 +79,8 @@ class DiffEngine:
         self.case_sensitive = case_sensitive
 
     def compare_text(self, source: str, target: str, source_info: Dict = None,
-                     target_info: Dict = None) -> CompareResult:
+                     target_info: Dict = None, source_properties: Any = None,
+                     target_properties: Any = None) -> CompareResult:
         """
         比对纯文本内容
 
@@ -78,6 +89,8 @@ class DiffEngine:
             target: 目标文本
             source_info: 源版本信息
             target_info: 目标版本信息
+            source_properties: 源配置属性（用于显示）
+            target_properties: 目标配置属性（用于显示）
 
         Returns:
             CompareResult: 比对结果
@@ -153,7 +166,9 @@ class DiffEngine:
             target_info=target_info or {"name": "target"},
             differences=differences,
             summary=self._calculate_summary(differences),
-            config_type="text"
+            config_type="text",
+            source_properties=source_properties or source,  # 添加源配置
+            target_properties=target_properties or target  # 添加目标配置
         )
 
     def compare_json(self, source: Dict, target: Dict, source_info: Dict = None,
@@ -174,12 +189,78 @@ class DiffEngine:
         differences = []
         self._compare_dict(source, target, differences, path)
 
+        # 展平JSON为点号路径格式
+        source_flat = self._flatten_dict(source)
+        target_flat = self._flatten_dict(target)
+
         return CompareResult(
             source_info=source_info or {"name": "source"},
             target_info=target_info or {"name": "target"},
             differences=differences,
             summary=self._calculate_summary(differences),
-            config_type="json"
+            config_type="json",
+            source_properties=source_flat,  # 添加源配置（展平）
+            target_properties=target_flat  # 添加目标配置（展平）
+        )
+
+    def compare_properties(self, source: Dict[str, str], target: Dict[str, str],
+                           source_info: Dict = None, target_info: Dict = None) -> CompareResult:
+        """
+        比对Properties配置
+
+        Args:
+            source: 源Properties字典
+            target: 目标Properties字典
+            source_info: 源版本信息
+            target_info: 目标版本信息
+
+        Returns:
+            CompareResult: 比对结果
+        """
+        differences = []
+        all_keys = set(source.keys()) | set(target.keys())
+
+        for key in all_keys:
+            if key not in source:
+                differences.append(DiffResult(
+                    path=key,
+                    type=DiffType.ADDED,
+                    source_value=None,
+                    target_value=target[key]
+                ))
+            elif key not in target:
+                differences.append(DiffResult(
+                    path=key,
+                    type=DiffType.DELETED,
+                    source_value=source[key],
+                    target_value=None
+                ))
+            elif source[key] != target[key]:
+                # 处理大小写敏感
+                if not self.case_sensitive:
+                    if source[key].lower() != target[key].lower():
+                        differences.append(DiffResult(
+                            path=key,
+                            type=DiffType.MODIFIED,
+                            source_value=source[key],
+                            target_value=target[key]
+                        ))
+                else:
+                    differences.append(DiffResult(
+                        path=key,
+                        type=DiffType.MODIFIED,
+                        source_value=source[key],
+                        target_value=target[key]
+                    ))
+
+        return CompareResult(
+            source_info=source_info or {"name": "source"},
+            target_info=target_info or {"name": "target"},
+            differences=differences,
+            summary=self._calculate_summary(differences),
+            config_type="properties",
+            source_properties=source,  # 添加源配置
+            target_properties=target  # 添加目标配置
         )
 
     def _compare_dict(self, source: Dict, target: Dict, differences: List[DiffResult],
@@ -265,63 +346,29 @@ class DiffEngine:
                     target_value=target_value
                 ))
 
-    def compare_properties(self, source: Dict[str, str], target: Dict[str, str],
-                           source_info: Dict = None, target_info: Dict = None) -> CompareResult:
+    def _flatten_dict(self, data: Dict, parent_key: str = '', sep: str = '.') -> Dict[str, Any]:
         """
-        比对Properties配置
+        展平嵌套字典
 
         Args:
-            source: 源Properties字典
-            target: 目标Properties字典
-            source_info: 源版本信息
-            target_info: 目标版本信息
+            data: 嵌套字典
+            parent_key: 父键
+            sep: 分隔符
 
         Returns:
-            CompareResult: 比对结果
+            展平后的字典
         """
-        differences = []
-        all_keys = set(source.keys()) | set(target.keys())
-
-        for key in all_keys:
-            if key not in source:
-                differences.append(DiffResult(
-                    path=key,
-                    type=DiffType.ADDED,
-                    source_value=None,
-                    target_value=target[key]
-                ))
-            elif key not in target:
-                differences.append(DiffResult(
-                    path=key,
-                    type=DiffType.DELETED,
-                    source_value=source[key],
-                    target_value=None
-                ))
-            elif source[key] != target[key]:
-                # 处理大小写敏感
-                if not self.case_sensitive:
-                    if source[key].lower() != target[key].lower():
-                        differences.append(DiffResult(
-                            path=key,
-                            type=DiffType.MODIFIED,
-                            source_value=source[key],
-                            target_value=target[key]
-                        ))
-                else:
-                    differences.append(DiffResult(
-                        path=key,
-                        type=DiffType.MODIFIED,
-                        source_value=source[key],
-                        target_value=target[key]
-                    ))
-
-        return CompareResult(
-            source_info=source_info or {"name": "source"},
-            target_info=target_info or {"name": "target"},
-            differences=differences,
-            summary=self._calculate_summary(differences),
-            config_type="properties"
-        )
+        items = []
+        for key, value in data.items():
+            new_key = f"{parent_key}{sep}{key}" if parent_key else key
+            if isinstance(value, dict):
+                items.extend(self._flatten_dict(value, new_key, sep=sep).items())
+            elif isinstance(value, list):
+                # 对于列表，转换为字符串
+                items.append((new_key, json.dumps(value, ensure_ascii=False)))
+            else:
+                items.append((new_key, str(value) if value is not None else ''))
+        return dict(items)
 
     def _calculate_summary(self, differences: List[DiffResult]) -> Dict[str, int]:
         """计算差异统计"""

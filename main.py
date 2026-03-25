@@ -14,13 +14,6 @@ class ConfigDiffTool:
     """配置比对工具主类"""
 
     def __init__(self, ignore_whitespace: bool = True, case_sensitive: bool = True):
-        """
-        初始化比对工具
-
-        Args:
-            ignore_whitespace: 是否忽略空白字符
-            case_sensitive: 是否大小写敏感
-        """
         self.engine = DiffEngine(
             ignore_whitespace=ignore_whitespace,
             case_sensitive=case_sensitive
@@ -31,16 +24,6 @@ class ConfigDiffTool:
                       output_file: str = None) -> str:
         """
         比对两个配置文件
-
-        Args:
-            source_file: 源文件路径
-            target_file: 目标文件路径
-            config_type: 配置类型（自动检测或指定）
-            output_format: 输出格式（json/html）
-            output_file: 输出文件路径
-
-        Returns:
-            str: 比对结果字符串
         """
         # 读取文件内容
         with open(source_file, 'r', encoding='utf-8') as f:
@@ -60,16 +43,38 @@ class ConfigDiffTool:
         source_data = parser.parse(source_content)
         target_data = parser.parse(target_content)
 
-        # 执行比对
-        source_info = {"name": Path(source_file).name, "path": source_file}
-        target_info = {"name": Path(target_file).name, "path": target_file}
+        # 准备版本信息（包含properties）
+        import datetime
+        source_info = {
+            "name": Path(source_file).name,
+            "path": source_file,
+            "update_time": datetime.fromtimestamp(Path(source_file).stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+        }
 
+        target_info = {
+            "name": Path(target_file).name,
+            "path": target_file,
+            "update_time": datetime.fromtimestamp(Path(target_file).stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+        }
+
+        # 执行比对
         if config_type in ['json']:
-            result = self.engine.compare_json(source_data, target_data, source_info, target_info)
+            result = self.engine.compare_json(
+                source_data, target_data,
+                source_info, target_info
+            )
         elif config_type in ['properties']:
-            result = self.engine.compare_properties(source_data, target_data, source_info, target_info)
+            result = self.engine.compare_properties(
+                source_data, target_data,
+                source_info, target_info
+            )
         else:
-            result = self.engine.compare_text(source_content, target_content, source_info, target_info)
+            result = self.engine.compare_text(
+                source_content, target_content,
+                source_info, target_info,
+                source_properties=source_content,  # 传递文本内容
+                target_properties=target_content
+            )
 
         # 格式化输出
         if output_format == 'html':
@@ -84,23 +89,6 @@ class ConfigDiffTool:
             print(f"报告已保存到: {output_file}")
 
         return output
-
-    def _detect_config_type(self, source_file: str, target_file: str) -> str:
-        """根据文件扩展名检测配置类型"""
-        ext = Path(source_file).suffix.lower()
-
-        type_map = {
-            '.json': 'json',
-            '.yaml': 'yaml',
-            '.yml': 'yaml',
-            '.xml': 'xml',
-            '.properties': 'properties',
-            '.txt': 'text',
-            '.conf': 'text',
-            '.cfg': 'text'
-        }
-
-        return type_map.get(ext, 'text')
 
 
 def main():
